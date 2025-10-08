@@ -1,0 +1,13 @@
+provider: aws
+defaultMode: encrypt
+include:
+  - src/main/resources/**/*.properties
+  - src/main/resources/**/*.yml
+  - src/main/resources/**/*.env
+exclude:
+  - target/**
+  - build/**
+  - node_modules/**
+  - .git/**
+json: false
+autoDetect: true

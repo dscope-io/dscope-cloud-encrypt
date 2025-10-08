@@ -1,0 +1,18 @@
+# Maven
+target/
+dependency-reduced-pom.xml
+
+# IDE
+.idea/
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+
+# Logs
+*.log
+
+# Java
+*.iml

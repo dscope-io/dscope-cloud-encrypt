@@ -1,0 +1,12 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "Launch CloudEncryptCLI",
+      "request": "launch",
+      "mainClass": "io.dscope.utils.crypto.CloudEncryptCLI",
+      "projectName": "cloud-encrypt-cli"
+    }
+  ]
+}

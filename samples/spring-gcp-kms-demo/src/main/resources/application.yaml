@@ -1,0 +1,15 @@
+app:
+  kms:
+    provider: ${KMS_PROVIDER:gcp}
+    project-id: ${GCP_PROJECT_ID:your-project-id}
+    location-id: ${GCP_KMS_LOCATION:us-central1}
+    key-ring-id: ${GCP_KMS_KEY_RING:sample-keyring}
+    key-id: ${GCP_KMS_KEY:sample-key}
+    aws-region: ${AWS_REGION:us-west-2}
+    aws-key-id: ${AWS_KMS_KEY_ID:}
+    azure-key-id: ${AZURE_KEY_ID:}
+    encrypted-secret: ${KMS_ENCRYPTED_SECRET:${GCP_ENCRYPTED_SECRET:ENC(REPLACE_WITH_BASE64)}}
+
+spring:
+  main:
+    banner-mode: "off"
