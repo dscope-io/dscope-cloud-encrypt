@@ -35,7 +35,18 @@ class CloudKmsConfigTest {
     }
 
     @Test
+    void toSettingsReturnsMutableCopy() {
+        CloudKmsConfig config = CloudKmsConfig.forAws("us-east-1", "alias/test");
+        Map<String, String> copy = config.toSettings();
+        copy.put("region", "override");
+
+        assertEquals("us-east-1", config.getSettings().get("region"));
+        assertEquals("override", copy.get("region"));
+    }
+
+    @Test
     void rejectsNullProvider() {
-        assertThrows(NullPointerException.class, () -> CloudKmsConfig.of(null, Map.of()));
+        NullPointerException ex = assertThrows(NullPointerException.class, () -> CloudKmsConfig.of(null, Map.of()));
+        assertEquals("provider", ex.getMessage());
     }
 }

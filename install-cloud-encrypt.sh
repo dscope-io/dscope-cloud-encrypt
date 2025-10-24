@@ -2,7 +2,7 @@
 set -e
 APP_NAME="cloud-encrypt"
 INSTALL_DIR="$HOME/.local/bin"
-JAR="target/cloud-encrypt-cli-1.0.0-shaded.jar"
+JAR="target/cloud-encrypt-cli-1.3.0-shaded.jar"
 
 if ! command -v mvn >/dev/null 2>&1; then echo "Maven not found"; exit 1; fi
 if ! command -v java >/dev/null 2>&1; then echo "Java not found"; exit 1; fi

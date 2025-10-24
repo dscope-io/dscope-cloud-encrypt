@@ -1,5 +1,10 @@
 package io.dscope.utils.crypto;
 
+import io.dscope.cloud.kms.CloudKmsFileService;
+import io.dscope.cloud.secret.CloudSecretConfig;
+import io.dscope.cloud.secret.CloudSecretStorageFactory;
+import io.dscope.cloud.secret.CloudSecretStorageService;
+
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import org.yaml.snakeyaml.DumperOptions;
@@ -24,6 +29,7 @@ import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -38,11 +44,16 @@ import java.util.concurrent.Callable;
         name = "cloud-encrypt",
     description = "Encrypt, decrypt, and audit configuration files across AWS, Azure, GCP, and OCI.",
         mixinStandardHelpOptions = true,
-        version = "1.0.0",
-        subcommands = {
-                CloudEncryptCLI.InitCommand.class,
-                CloudEncryptCLI.StoreCommand.class
-        }
+    version = "1.3.0",
+    subcommands = {
+        CloudEncryptCLI.InitCommand.class,
+        CloudEncryptCLI.StoreCommand.class,
+        CloudEncryptCLI.EncryptFileCommand.class,
+        CloudEncryptCLI.DecryptFileCommand.class,
+        CloudEncryptCLI.SecretPutCommand.class,
+        CloudEncryptCLI.SecretGetCommand.class,
+        CloudEncryptCLI.SecretDeleteCommand.class
+    }
 )
 public class CloudEncryptCLI implements Callable<Integer> {
 
@@ -56,6 +67,8 @@ public class CloudEncryptCLI implements Callable<Integer> {
         boolean json = false;
         boolean autoDetect = true;
         Map<String, String> kms = new LinkedHashMap<>();
+        String secretProvider;
+        Map<String, String> secret = new LinkedHashMap<>();
     }
 
     private static Config config = new Config();
@@ -206,6 +219,222 @@ public class CloudEncryptCLI implements Callable<Integer> {
         }
     }
 
+    @Command(name = "encrypt", description = "Encrypt a file using envelope encryption backed by Cloud KMS", mixinStandardHelpOptions = true)
+    static class EncryptFileCommand implements Callable<Integer> {
+
+        @Spec
+        CommandSpec spec;
+
+        @Option(names = "--provider", paramLabel = "PROVIDER", description = "Override cloud provider (aws|azure|gcp|oci)")
+        String provider;
+
+        @Option(names = "--file", required = true, paramLabel = "FILE", description = "Plaintext file to encrypt")
+        Path input;
+
+        @Option(names = "--out", required = true, paramLabel = "FILE", description = "Destination file for encrypted payload")
+        Path output;
+
+        @Option(names = "--set", paramLabel = "KEY=VALUE", description = "Override provider setting (repeatable)")
+        List<String> overridePairs = new ArrayList<>();
+
+        @Override
+        public Integer call() throws Exception {
+            loadConfig();
+
+            Map<String, String> overrides = new LinkedHashMap<>();
+            for (String pair : overridePairs) {
+                try {
+                    addOverride(overrides, pair);
+                } catch (IllegalArgumentException ex) {
+                    throw new CommandLine.ParameterException(spec.commandLine(), ex.getMessage(), ex);
+                }
+            }
+
+            String resolvedProvider = resolveProvider(provider);
+            CloudKmsConfig kmsConfig = buildKmsConfig(resolvedProvider, config.kms, overrides);
+
+            CloudKmsFileService service = new CloudKmsFileService();
+            service.encryptFile(input, output, kmsConfig);
+
+            spec.commandLine().getOut().println("🔒 Encrypted " + input + " -> " + output);
+            return CommandLine.ExitCode.OK;
+        }
+    }
+
+    @Command(name = "decrypt", description = "Decrypt a file produced by the encrypt subcommand", mixinStandardHelpOptions = true)
+    static class DecryptFileCommand implements Callable<Integer> {
+
+        @Spec
+        CommandSpec spec;
+
+        @Option(names = "--provider", paramLabel = "PROVIDER", description = "Override cloud provider (aws|azure|gcp|oci)")
+        String provider;
+
+        @Option(names = "--file", required = true, paramLabel = "FILE", description = "Encrypted payload produced by the encrypt command")
+        Path input;
+
+        @Option(names = "--out", required = true, paramLabel = "FILE", description = "Destination file for decrypted plaintext")
+        Path output;
+
+        @Option(names = "--set", paramLabel = "KEY=VALUE", description = "Override provider setting (repeatable)")
+        List<String> overridePairs = new ArrayList<>();
+
+        @Override
+        public Integer call() throws Exception {
+            loadConfig();
+
+            Map<String, String> overrides = new LinkedHashMap<>();
+            for (String pair : overridePairs) {
+                try {
+                    addOverride(overrides, pair);
+                } catch (IllegalArgumentException ex) {
+                    throw new CommandLine.ParameterException(spec.commandLine(), ex.getMessage(), ex);
+                }
+            }
+
+            String resolvedProvider = resolveProvider(provider);
+            CloudKmsConfig kmsConfig = buildKmsConfig(resolvedProvider, config.kms, overrides);
+
+            CloudKmsFileService service = new CloudKmsFileService();
+            service.decryptFile(input, output, kmsConfig);
+
+            spec.commandLine().getOut().println("🔓 Decrypted " + input + " -> " + output);
+            return CommandLine.ExitCode.OK;
+        }
+    }
+
+    @Command(name = "secret-put", description = "Persist an encrypted payload in the configured secret manager", mixinStandardHelpOptions = true)
+    static class SecretPutCommand implements Callable<Integer> {
+
+        @Spec
+        CommandSpec spec;
+
+        @Option(names = "--provider", paramLabel = "PROVIDER", description = "Override secret manager provider (aws|azure|gcp|oci|memory)")
+        String provider;
+
+        @Option(names = "--name", required = true, paramLabel = "NAME", description = "Secret identifier")
+        String name;
+
+        @Option(names = "--file", required = true, paramLabel = "FILE", description = "File containing ciphertext to store")
+        Path file;
+
+        @Option(names = "--set", paramLabel = "KEY=VALUE", description = "Override provider setting (repeatable)")
+        List<String> overridePairs = new ArrayList<>();
+
+        @Option(names = "--metadata", paramLabel = "KEY=VALUE", description = "Attach metadata to the stored secret (repeatable)")
+        List<String> metadataPairs = new ArrayList<>();
+
+        @Override
+        public Integer call() throws Exception {
+            loadConfig();
+
+            Map<String, String> overrides = collectPairs(overridePairs, spec, "--set");
+            Map<String, String> metadata = collectPairs(metadataPairs, spec, "--metadata");
+
+            String resolvedProvider = resolveSecretProvider(provider);
+            CloudSecretConfig secretConfig = buildSecretConfig(resolvedProvider, config.secret, overrides);
+
+            if (!Files.exists(file) || !Files.isRegularFile(file)) {
+                throw new CommandLine.ParameterException(spec.commandLine(), "File does not exist: " + file);
+            }
+            byte[] payload = Files.readAllBytes(file);
+
+            try (CloudSecretStorageService service = CloudSecretStorageFactory.create(secretConfig)) {
+                service.putSecret(name, payload, metadata);
+            }
+
+            spec.commandLine().getOut().println("☁️  Stored secret '" + name + "' using " + resolvedProvider + " secret manager");
+            return CommandLine.ExitCode.OK;
+        }
+    }
+
+    @Command(name = "secret-get", description = "Fetch an encrypted payload from the configured secret manager", mixinStandardHelpOptions = true)
+    static class SecretGetCommand implements Callable<Integer> {
+
+        @Spec
+        CommandSpec spec;
+
+        @Option(names = "--provider", paramLabel = "PROVIDER", description = "Override secret manager provider (aws|azure|gcp|oci|memory)")
+        String provider;
+
+        @Option(names = "--name", required = true, paramLabel = "NAME", description = "Secret identifier")
+        String name;
+
+        @Option(names = "--out", paramLabel = "FILE", description = "Write secret payload to file; defaults to STDOUT as Base64")
+        Path output;
+
+        @Option(names = "--set", paramLabel = "KEY=VALUE", description = "Override provider setting (repeatable)")
+        List<String> overridePairs = new ArrayList<>();
+
+        @Option(names = "--print-metadata", description = "Print metadata as JSON after retrieval")
+        boolean printMetadata;
+
+        @Override
+        public Integer call() throws Exception {
+            loadConfig();
+
+            Map<String, String> overrides = collectPairs(overridePairs, spec, "--set");
+            String resolvedProvider = resolveSecretProvider(provider);
+            CloudSecretConfig secretConfig = buildSecretConfig(resolvedProvider, config.secret, overrides);
+
+            CloudSecretStorageService.SecretRecord record;
+            try (CloudSecretStorageService service = CloudSecretStorageFactory.create(secretConfig)) {
+                record = service.getSecret(name);
+            }
+
+            if (output != null) {
+                Path parent = output.getParent();
+                if (parent != null && !Files.exists(parent)) {
+                    Files.createDirectories(parent);
+                }
+        Files.write(output, record.data(),
+            java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING);
+                spec.commandLine().getOut().println("💾 Wrote secret payload to " + output);
+            } else {
+                String encoded = Base64.getEncoder().encodeToString(record.data());
+                spec.commandLine().getOut().println(encoded);
+            }
+
+            if (printMetadata && !record.metadata().isEmpty()) {
+                spec.commandLine().getOut().println("Metadata: " + gson.toJson(record.metadata()));
+            }
+
+            return CommandLine.ExitCode.OK;
+        }
+    }
+
+    @Command(name = "secret-delete", description = "Remove a payload from the configured secret manager", mixinStandardHelpOptions = true)
+    static class SecretDeleteCommand implements Callable<Integer> {
+
+        @Spec
+        CommandSpec spec;
+
+        @Option(names = "--provider", paramLabel = "PROVIDER", description = "Override secret manager provider (aws|azure|gcp|oci|memory)")
+        String provider;
+
+        @Option(names = "--name", required = true, paramLabel = "NAME", description = "Secret identifier")
+        String name;
+
+        @Option(names = "--set", paramLabel = "KEY=VALUE", description = "Override provider setting (repeatable)")
+        List<String> overridePairs = new ArrayList<>();
+
+        @Override
+        public Integer call() throws Exception {
+            loadConfig();
+
+            Map<String, String> overrides = collectPairs(overridePairs, spec, "--set");
+            String resolvedProvider = resolveSecretProvider(provider);
+            CloudSecretConfig secretConfig = buildSecretConfig(resolvedProvider, config.secret, overrides);
+
+            try (CloudSecretStorageService service = CloudSecretStorageFactory.create(secretConfig)) {
+                service.deleteSecret(name);
+            }
+
+            spec.commandLine().getOut().println("🗑️  Scheduled deletion for secret '" + name + "' in " + resolvedProvider + " secret manager");
+            return CommandLine.ExitCode.OK;
+        }
+    }
+
     private static void initConfig() throws IOException {
         Path path = Paths.get(".cloudencrypt.yml");
         if (Files.exists(path)) {
@@ -257,6 +486,24 @@ public class CloudEncryptCLI implements Callable<Integer> {
         }
         yamlData.put("kms", kms);
 
+        Map<String, Object> secret = new LinkedHashMap<>();
+        secret.put("provider", provider);
+        Map<String, Object> secretSettings = new LinkedHashMap<>();
+        switch (provider) {
+            case "azure" -> secretSettings.put("vaultUrl", "https://<key-vault-name>.vault.azure.net/");
+            case "gcp" -> secretSettings.put("project", "your-gcp-project");
+            case "oci" -> {
+                secretSettings.put("compartmentId", "ocid1.compartment.oc1..exampleuniqueID");
+                secretSettings.put("vaultId", "ocid1.vault.oc1..exampleuniqueID");
+                secretSettings.put("keyId", "ocid1.key.oc1..exampleuniqueID");
+                secretSettings.put("region", "us-ashburn-1");
+            }
+            case "aws" -> secretSettings.put("region", "us-west-2");
+            default -> secretSettings.put("providerSpecific", "update-with-real-values");
+        }
+        secret.put("settings", secretSettings);
+        yamlData.put("secret", secret);
+
         DumperOptions opts = new DumperOptions();
         opts.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
         Yaml yaml = new Yaml(opts);
@@ -287,6 +534,7 @@ public class CloudEncryptCLI implements Callable<Integer> {
                 }
                 if (data.containsKey("provider")) {
                     config.provider = Objects.toString(data.get("provider"), null);
+                    config.secretProvider = config.provider;
                 }
                 if (data.containsKey("defaultMode")) {
                     config.defaultMode = Objects.toString(data.get("defaultMode"), null);
@@ -324,11 +572,42 @@ public class CloudEncryptCLI implements Callable<Integer> {
                         }
                     }
                 }
+                config.secret.clear();
+                if (data.containsKey("secret")) {
+                    Object secretObj = data.get("secret");
+                    if (secretObj instanceof Map<?, ?> secretMap) {
+                        Object providerObj = secretMap.get("provider");
+                        if (providerObj != null) {
+                            config.secretProvider = Objects.toString(providerObj, null);
+                        }
+                        Object settingsObj = secretMap.get("settings");
+                        if (settingsObj instanceof Map<?, ?> settingsMap) {
+                            for (Map.Entry<?, ?> entry : settingsMap.entrySet()) {
+                                if (entry.getKey() != null && entry.getValue() != null) {
+                                    config.secret.put(entry.getKey().toString(), Objects.toString(entry.getValue(), ""));
+                                }
+                            }
+                        } else {
+                            for (Map.Entry<?, ?> entry : secretMap.entrySet()) {
+                                Object key = entry.getKey();
+                                if ("provider".equalsIgnoreCase(String.valueOf(key))) {
+                                    continue;
+                                }
+                                if (key != null && entry.getValue() != null) {
+                                    config.secret.put(key.toString(), Objects.toString(entry.getValue(), ""));
+                                }
+                            }
+                        }
+                    }
+                }
                 System.out.println("⚙️  Loaded config from " + location);
                 break;
             } catch (Exception e) {
                 System.out.println("⚠️  Failed to load config: " + e.getMessage());
             }
+        }
+        if (config.secretProvider == null || config.secretProvider.isBlank()) {
+            config.secretProvider = config.provider;
         }
     }
 
@@ -485,6 +764,16 @@ public class CloudEncryptCLI implements Callable<Integer> {
         throw new IllegalStateException("Unable to determine provider. Set provider in .cloudencrypt.yml or pass --provider.");
     }
 
+    private static String resolveSecretProvider(String override) {
+        if (override != null && !override.isBlank()) {
+            return override.trim().toLowerCase(Locale.ROOT);
+        }
+        if (config.secretProvider != null && !config.secretProvider.isBlank()) {
+            return config.secretProvider.trim().toLowerCase(Locale.ROOT);
+        }
+        return resolveProvider(null);
+    }
+
     static CloudKmsConfig buildKmsConfig(String provider, Map<String, String> base, Map<String, String> overrides) {
         Objects.requireNonNull(provider, "provider");
         Map<String, String> merged = new LinkedHashMap<>();
@@ -495,6 +784,22 @@ public class CloudEncryptCLI implements Callable<Integer> {
             merged.putAll(overrides);
         }
         CloudKmsConfig.Builder builder = CloudKmsConfig.builder(provider);
+        for (Map.Entry<String, String> entry : merged.entrySet()) {
+            builder.with(entry.getKey(), entry.getValue());
+        }
+        return builder.build();
+    }
+
+    static CloudSecretConfig buildSecretConfig(String provider, Map<String, String> base, Map<String, String> overrides) {
+        Objects.requireNonNull(provider, "provider");
+        Map<String, String> merged = new LinkedHashMap<>();
+        if (base != null) {
+            merged.putAll(base);
+        }
+        if (overrides != null) {
+            merged.putAll(overrides);
+        }
+        CloudSecretConfig.Builder builder = CloudSecretConfig.builder(provider);
         for (Map.Entry<String, String> entry : merged.entrySet()) {
             builder.with(entry.getKey(), entry.getValue());
         }
@@ -531,6 +836,21 @@ public class CloudEncryptCLI implements Callable<Integer> {
             throw new IllegalArgumentException("Override key cannot be empty");
         }
         overrides.put(key, value);
+    }
+
+    private static Map<String, String> collectPairs(List<String> pairs, CommandSpec spec, String optionName) {
+        Map<String, String> values = new LinkedHashMap<>();
+        if (pairs == null) {
+            return values;
+        }
+        for (String pair : pairs) {
+            try {
+                addOverride(values, pair);
+            } catch (IllegalArgumentException ex) {
+                throw new CommandLine.ParameterException(spec.commandLine(), optionName + " expects key=value entries but was: " + pair, ex);
+            }
+        }
+        return values;
     }
 
     private static String detectProvider() {
