@@ -5,6 +5,7 @@ import com.amazonaws.services.kms.AWSKMSClientBuilder;
 import com.amazonaws.services.kms.model.DecryptRequest;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Map;
 
@@ -21,7 +22,8 @@ public class AwsDecryptor implements CloudDecryptor {
     public String decrypt(String cipherBase64) {
         byte[] encrypted = Base64.getDecoder().decode(cipherBase64);
         DecryptRequest req = new DecryptRequest().withCiphertextBlob(ByteBuffer.wrap(encrypted));
-        byte[] plain = kms.decrypt(req).getPlaintext().array();
-        return new String(plain);
+        ByteBuffer plainBuffer = kms.decrypt(req).getPlaintext();
+        byte[] plain = ByteBufferUtils.copyRemaining(plainBuffer);
+        return new String(plain, StandardCharsets.UTF_8);
     }
 }

@@ -20,9 +20,25 @@
     <google.secretmanager.version>2.32.0</google.secretmanager.version>
     <aws.sdk.v2.version>2.27.20</aws.sdk.v2.version>
     <azure.keyvault.secrets.version>4.8.7</azure.keyvault.secrets.version>
+    <spring.boot.version>3.5.6</spring.boot.version>
   </properties>
 
   <dependencies>
+
+    <!-- Spring Boot integration -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-autoconfigure</artifactId>
+      <version>${spring.boot.version}</version>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-configuration-processor</artifactId>
+      <version>${spring.boot.version}</version>
+      <scope>provided</scope>
+    </dependency>
+
     <!-- AWS SDK v1 KMS -->
     <dependency>
       <groupId>com.amazonaws</groupId>
@@ -58,7 +74,7 @@
     <dependency>
       <groupId>com.google.cloud</groupId>
       <artifactId>google-cloud-kms</artifactId>
-  <version>2.16.0</version>
+      <version>2.16.0</version>
     </dependency>
     <dependency>
       <groupId>com.google.cloud</groupId>
@@ -66,7 +82,7 @@
       <version>${google.secretmanager.version}</version>
     </dependency>
 
-  <!-- JSON support for CLI JSON mode -->
+    <!-- JSON support for CLI JSON mode -->
     <dependency>
       <groupId>com.google.code.gson</groupId>
       <artifactId>gson</artifactId>
@@ -150,6 +166,12 @@
         <configuration>
           <release>21</release>
         </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-resources-plugin</artifactId>
+        <version>3.3.1</version>
       </plugin>
 
       <plugin>
