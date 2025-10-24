@@ -26,6 +26,14 @@ public final class CloudKmsConfig {
         return settings;
     }
 
+    /**
+     * Returns a mutable copy of the provider settings. Callers can safely modify the returned map
+     * without affecting this configuration instance.
+     */
+    public Map<String, String> toSettings() {
+        return new HashMap<>(settings);
+    }
+
     Map<String, String> asMutableMap() {
         return new HashMap<>(settings);
     }

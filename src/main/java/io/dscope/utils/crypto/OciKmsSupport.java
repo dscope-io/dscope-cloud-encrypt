@@ -9,14 +9,14 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
-final class OciKmsSupport {
+public final class OciKmsSupport {
 
     private static final String DEFAULT_PROFILE = "DEFAULT";
 
     private OciKmsSupport() {
     }
 
-    static AuthenticationDetailsProvider authenticationProvider(Map<String, String> config) {
+    public static AuthenticationDetailsProvider authenticationProvider(Map<String, String> config) {
         String profile = valueOrDefault(config, "profile", DEFAULT_PROFILE);
         String configFile = valueOrDefault(config, "configFile", null);
         try {

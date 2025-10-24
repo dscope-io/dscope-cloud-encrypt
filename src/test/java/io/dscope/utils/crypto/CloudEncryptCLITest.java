@@ -1,5 +1,6 @@
 package io.dscope.utils.crypto;
 
+import io.dscope.cloud.secret.CloudSecretConfig;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -52,5 +53,23 @@ class CloudEncryptCLITest {
 
         assertEquals(2, updated.size());
         assertEquals("HELLO=ENC(new)", updated.get(1));
+    }
+
+    @Test
+    void buildSecretConfigMergesOverrides() {
+        Map<String, String> base = new LinkedHashMap<>();
+        base.put("project", "base-project");
+        base.put("region", "us-central1");
+
+        Map<String, String> overrides = new LinkedHashMap<>();
+        overrides.put("region", "europe-west1");
+        overrides.put("label", "prod");
+
+        CloudSecretConfig secretConfig = CloudEncryptCLI.buildSecretConfig("gcp", base, overrides);
+
+        assertEquals("gcp", secretConfig.getProvider());
+        assertEquals("base-project", secretConfig.getSettings().get("project"));
+        assertEquals("europe-west1", secretConfig.getSettings().get("region"));
+        assertEquals("prod", secretConfig.getSettings().get("label"));
     }
 }
